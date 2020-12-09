@@ -159,13 +159,3 @@ class Ping(asyncore.dispatcher):
       print('self.time_received is ', self.time_packet_is_received)
       print('time sent is ', self.time_packet_is_sent)
       return (self.time_packet_is_received - self.time_packet_is_sent)
-
-
-
- 
-    
-
-ping_instance = Ping('twitter.com', 1, 2)
-asyncore.loop(2)          
-# 
-print(ping_instance.delay_time())
