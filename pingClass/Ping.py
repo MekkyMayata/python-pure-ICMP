@@ -4,30 +4,33 @@ import time
 import select
 import random
 import asyncore
-from socket_errors import linux_socket_errors
+from sys import exit
+from socketErrors import socket_errors
 
 icmpProto = socket.getprotobyname('icmp')
 
 class Ping(asyncore.dispatcher):
   """
   """
-  def __init__(self, destination_addr, app_packet_id, timeout):
+  def __init__(self, destination_addr, timeout, sizeofpacket):
     asyncore.dispatcher.__init__(self)
 
     self.destination_addr = destination_addr
     self.app_packet_id = random.randint(0, 65535)
     self.timeout = timeout
-    self.packet = self.packetCreator(self.app_packet_id)
+    self.sizeofpacket = sizeofpacket
+    self.packet = self.packetCreator(self.app_packet_id, sizeofpacket)
     self.time_packet_is_sent = 0
     self.time_packet_is_received = 0
+    self.recv_packet = ''
 
     # create a socket interface
     try: 
       self.create_socket(socket.AF_INET, socket.SOCK_RAW, icmpProto)
       self.connect( (self.destination_addr, 1) )
     except socket.error as err:
-      if err.errno in linux_socket_errors:
-        raise socket.error(''.join((err.args[1], linux_socket_errors[err.errno])))
+      if err.errno in socket_errors.linux_socket_errors:
+        raise socket.error(''.join((err.args[1], socket_errors.linux_socket_errors[err.errno])))
       raise
 
   def create_socket(self, family, type, icmp_proto):
@@ -70,7 +73,7 @@ class Ping(asyncore.dispatcher):
 
     return sum & 0xFFFF
   
-  def packetCreator(self, packet_id):
+  def packetCreator(self, packet_id, packet_size):
     """
     packetCreator(integer) -> bytes
 
@@ -91,6 +94,10 @@ class Ping(asyncore.dispatcher):
     """
     icmp_MessageType, icmp_Code  = 8, 0    # standards
 
+    # handle negative packet size
+    if packet_size < 0:
+      print(f'ping: illegal negative packet size {packet_size}')
+      exit(2)
     # construct packet header and payload
     packet_Header = struct.pack('BBHHH', icmp_MessageType, icmp_Code, 0, packet_id, 1)
     payload = bytes('loudpipes', 'utf-8')
@@ -102,9 +109,6 @@ class Ping(asyncore.dispatcher):
     
     packet_Header = struct.pack('BBHHH', icmp_MessageType,
                                 icmp_Code, network_byte_order_checksum, packet_id, 1)
-    print('packet header length is: ', len(packet_Header))
-    print('packet payload is: ', len(payload))
-    print((len(packet_Header + payload)))
     return (packet_Header + payload)
 
   def handle_write(self):
@@ -141,10 +145,9 @@ class Ping(asyncore.dispatcher):
   def handle_read(self):
     time_byte_is_read = time.time()
 
-    # *************todo*****************    
-    # implement varying buffer size to recieve
-    # ping.c recieves 64 by default
+    # 1024 is the max receivable byte. Actual might be less
     rec_packet= self.recv(1024)
+    self.recv_packet = rec_packet
 
     icmp_header = rec_packet[20:28] # since 8 bytes was packed and sent initially
 
@@ -153,9 +156,17 @@ class Ping(asyncore.dispatcher):
     if app_pid == self.app_packet_id:
         self.time_packet_is_received = time_byte_is_read
         self.close()
-        
+  
+  def prettifyHeader(self, names, struct_format, data):
+    """ 
+    Ping.prettifyHeader(names: object, struct_format: Union[bytes, Unknown],
+    data: Union[bytes, bytearray]) -> dict
+
+    unpacks received packet header to a dict
+    """
+    unpacked_data = struct.unpack(struct_format, data)
+    return dict(zip(names, unpacked_data))
+
   def delay_time(self):
     if self.time_packet_is_received > 0:
-      print('self.time_received is ', self.time_packet_is_received)
-      print('time sent is ', self.time_packet_is_sent)
       return (self.time_packet_is_received - self.time_packet_is_sent)
