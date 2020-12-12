@@ -11,8 +11,15 @@ icmpProto = socket.getprotobyname('icmp')
 
 class Ping(asyncore.dispatcher):
   """
+  Ping class based on asynchronous socket
+  handler dispatcher class.
   """
   def __init__(self, destination_addr, timeout, sizeofpacket):
+    """
+    - destination_addr is remote server address to ping
+    - timeout is maximum allowable time destination_addr should reply host
+
+    """
     asyncore.dispatcher.__init__(self)
 
     self.destination_addr = destination_addr
@@ -27,6 +34,8 @@ class Ping(asyncore.dispatcher):
     # create a socket interface
     try: 
       self.create_socket(socket.AF_INET, socket.SOCK_RAW, icmpProto)
+      # second element of tuple is mandatory but icmp does not use port
+      # so a random port was used
       self.connect( (self.destination_addr, 1) )
     except socket.error as err:
       if err.errno in socket_errors.linux_socket_errors:
@@ -36,6 +45,10 @@ class Ping(asyncore.dispatcher):
   def create_socket(self, family, type, icmp_proto):
     """
     Ping.create_socket(family, type, icmp_proto: int) -> None
+    - family is the address structure to be used on the socket API
+    - type is the socket type to use (a raw socket in this case)
+    - icmp_proto is the ICMP protocol number
+
     creates a non-blocking socket interface
     """
     socket_interface = socket.socket(family, type, icmpProto)
@@ -49,7 +62,7 @@ class Ping(asyncore.dispatcher):
     Derived from mdelatorre/checksum 
     (https://github.com/mdelatorre/checksum/blob/master/ichecksum.py)
 
-    Compute the Internet Checksum of the supplied data.  The checksum is
+    Computes the Internet Checksum of the supplied data.  The checksum is
     initialized to zero.  Place the return value in the checksum field of a
     packet.  When the packet is received, check the checksum, by passing
     in the checksum field of the packet and the data.  If the result is zero,
@@ -75,14 +88,14 @@ class Ping(asyncore.dispatcher):
   
   def packetCreator(self, packet_id, packet_size):
     """
-    packetCreator(integer) -> bytes
+    packetCreator(packet_id: integer, packet_size: integer) -> bytes
 
-    ICMP packets: header (8bytes)  + variable length payload
+    ICMP packet consist of header (8bytes)  + variable length payload
     header: 
-      standards are ICMP message type(8 bits) + code(8 bit) + checksum(2 bytes)
-      additional info: application_id (2 bytes) + sequence number(2 bytes)
+      standards are ICMP message type(8 bits), code(8 bit), checksum(2 bytes),
+      application_id (2 bytes),
+      and sequence number(2 bytes)
 
-      **notes**
       - application_id must be unique for every ping process
       - sequence number is an int that increments within a specific ping process
 
@@ -91,8 +104,9 @@ class Ping(asyncore.dispatcher):
         utilize ports (like TCP and UDP).
 
       https://en.wikipedia.org/wiki/Internet_Control_Message_Protocol
+
     """
-    icmp_MessageType, icmp_Code  = 8, 0    # standards
+    icmp_MessageType, icmp_Code  = 8, 0    # defaults
 
     # handle negative packet size
     if packet_size < 0:
@@ -107,6 +121,7 @@ class Ping(asyncore.dispatcher):
     checksum = self.checksumCreator(icmp_Message)
     network_byte_order_checksum = socket.htons(checksum) # convert 16bit host byte checksum
     
+    # update checksum with calculated value
     packet_Header = struct.pack('BBHHH', icmp_MessageType,
                                 icmp_Code, network_byte_order_checksum, packet_id, 1)
     return (packet_Header + payload)
@@ -129,7 +144,8 @@ class Ping(asyncore.dispatcher):
     Ping.writable() -> Bool
 
     checks if the packet byte stream is not empty.
-    a recquired check for adding the channel socket 
+
+    - A recquired check for adding the channel socket 
     to the write events list 
     """
     return len(self.packet) > 0
@@ -149,13 +165,14 @@ class Ping(asyncore.dispatcher):
     rec_packet= self.recv(1024)
     self.recv_packet = rec_packet
 
+    # extract the encapsulated ICMP packet header from the buffer received
     icmp_header = rec_packet[20:28] # since 8 bytes was packed and sent initially
 
     type, code, checksum, app_pid, sequence = struct.unpack('bbHHH', icmp_header)
 
     if app_pid == self.app_packet_id:
-        self.time_packet_is_received = time_byte_is_read
-        self.close()
+      self.time_packet_is_received = time_byte_is_read
+      self.close()
   
   def prettifyHeader(self, names, struct_format, data):
     """ 
